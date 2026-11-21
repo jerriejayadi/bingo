@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bingo Generator</title>
+<style>
+  :root {
+    --bg: #f4f1ea;
+    --card: #ffffff;
+    --ink: #1d1d1f;
+    --muted: #8a8577;
+    --cell: #faf8f3;
+    --cell-border: #e2ddd0;
+    --mark: #2f6fed;
+    --mark-ink: #ffffff;
+    --line: #f2b134;
+    --line-ink: #1d1d1f;
+    --head-off: #d8d3c6;
+    --head-on: #e5484d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --card: #1e1e22; --ink: #f2f2f2; --muted: #8d8d96;
+      --cell: #26262b; --cell-border: #34343a; --head-off: #3a3a41;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: var(--bg); color: var(--ink);
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif;
+    padding: 16px;
+  }
+  .card {
+    background: var(--card); border-radius: 20px; padding: 24px;
+    box-shadow: 0 10px 40px rgba(0,0,0,.08); width: min(440px, 100%);
+    position: relative;
+  }
+  .header, .board { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .header { margin-bottom: 12px; }
+  .letter {
+    aspect-ratio: 1; display: grid; place-items: center; border-radius: 12px;
+    font-size: clamp(28px, 8vw, 40px); font-weight: 800;
+    background: var(--head-off); color: var(--card);
+    transition: background .3s, transform .3s;
+  }
+  .letter.on { background: var(--head-on); color: #fff; animation: pop .4s ease; }
+  .cell {
+    aspect-ratio: 1; border: 2px solid var(--cell-border); border-radius: 12px;
+    background: var(--cell); color: var(--ink);
+    font: inherit; font-size: clamp(20px, 6vw, 28px); font-weight: 700;
+    cursor: pointer; transition: background .15s, transform .1s, border-color .15s;
+  }
+  .cell:hover:not(:disabled) { transform: scale(1.04); }
+  .cell.marked { background: var(--mark); color: var(--mark-ink); border-color: var(--mark); }
+  .cell.in-line { background: var(--line); color: var(--line-ink); border-color: var(--line); }
+  .cell:disabled { cursor: default; }
+  .footer { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; }
+  .status { color: var(--muted); font-size: 14px; }
+  button.again {
+    font: inherit; font-weight: 700; font-size: 16px; padding: 10px 20px;
+    border: 0; border-radius: 999px; background: var(--ink); color: var(--card); cursor: pointer;
+  }
+  button.again:hover { opacity: .85; }
+  .overlay {
+    position: absolute; inset: 0; border-radius: 20px; display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+    background: color-mix(in srgb, var(--card) 85%, transparent); backdrop-filter: blur(3px);
+  }
+  .overlay.show { display: flex; animation: fade .3s ease; }
+  .overlay h1 { margin: 0; font-size: 56px; letter-spacing: 4px; color: var(--head-on); }
+  @keyframes pop { 50% { transform: scale(1.2); } }
+  @keyframes fade { from { opacity: 0; } }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="header" id="header"></div>
+    <div class="board" id="board"></div>
+    <div class="footer">
+      <span class="status" id="status">Lines: 0 / 5</span>
+      <button class="again" id="againBtn">Again</button>
+    </div>
+    <div class="overlay" id="overlay">
+      <h1>BINGO!</h1>
+      <button class="again" id="againBtn2">Again</button>
+    </div>
+  </div>
+
+<script>
+  const LETTERS = ["B", "I", "N", "G", "O"];
+  const SIZE = 5;
+
+  // All 12 winning lines as arrays of cell indexes (0-24)
+  const LINES = [];
+  for (let r = 0; r < SIZE; r++) LINES.push([...Array(SIZE)].map((_, c) => r * SIZE + c)); // rows
+  for (let c = 0; c < SIZE; c++) LINES.push([...Array(SIZE)].map((_, r) => r * SIZE + c)); // cols
+  LINES.push([...Array(SIZE)].map((_, i) => i * SIZE + i));                              // diag ↘
+  LINES.push([...Array(SIZE)].map((_, i) => i * SIZE + (SIZE - 1 - i)));                 // diag ↙
+
+  const headerEl = document.getElementById("header");
+  const boardEl = document.getElementById("board");
+  const statusEl = document.getElementById("status");
+  const overlayEl = document.getElementById("overlay");
+
+  let marked = [];
+  let finished = false;
+
+  LETTERS.forEach(l => {
+    const d = document.createElement("div");
+    d.className = "letter";
+    d.textContent = l;
+    headerEl.appendChild(d);
+  });
+
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  function newGame() {
+    const nums = shuffle([...Array(25)].map((_, i) => i + 1));
+    marked = Array(25).fill(false);
+    finished = false;
+    overlayEl.classList.remove("show");
+    boardEl.innerHTML = "";
+    nums.forEach((n, i) => {
+      const b = document.createElement("button");
+      b.className = "cell";
+      b.textContent = n;
+      b.addEventListener("click", () => toggle(i));
+      boardEl.appendChild(b);
+    });
+    update();
+  }
+
+  function toggle(i) {
+    if (finished) return;
+    marked[i] = !marked[i];
+    update();
+  }
+
+  function update() {
+    const done = LINES.filter(line => line.every(i => marked[i]));
+    const inLine = new Set(done.flat());
+    const count = Math.min(done.length, LETTERS.length);
+
+    [...boardEl.children].forEach((cell, i) => {
+      cell.classList.toggle("marked", marked[i]);
+      cell.classList.toggle("in-line", inLine.has(i));
+    });
+    [...headerEl.children].forEach((el, i) => el.classList.toggle("on", i < count));
+    statusEl.textContent = `Lines: ${count} / 5`;
+
+    if (count >= LETTERS.length) {
+      finished = true;
+      [...boardEl.children].forEach(c => c.disabled = true);
+      setTimeout(() => overlayEl.classList.add("show"), 400);
+    }
+  }
+
+  document.getElementById("againBtn").addEventListener("click", newGame);
+  document.getElementById("againBtn2").addEventListener("click", newGame);
+  newGame();
+</script>
+</body>
+</html>
